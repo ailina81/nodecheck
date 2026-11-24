@@ -1,0 +1,5 @@
+streamlit>=1.50
+pandas
+openai>=1.40
+fpdf2>=2.7
+python-dotenv
