@@ -272,6 +272,23 @@ _SURF_CODE = {"Пол": "F", "Стены": "W", "Потолок": "C", "Зона
 PRICE_LABEL = {1: "₸", 2: "₸₸", 3: "₸₸₸", 4: "₸₸₸₸", 5: "₸₸₸₸₸"}
 
 
+# Семейства взаимозаменяемых материалов: аналог ищем только внутри семейства
+FAMILIES = [
+    {"tile", "spc"},                                   # твёрдые водостойкие полы
+    {"laminate_w", "laminate", "engineered", "massive", "spc"},  # ламинат / доска
+    {"lino_comm", "linoleum", "spc"},                  # рулонные / виниловые
+    {"carpet", "cork"},                                # мягкие покрытия
+    {"paint_wash", "plaster_dec"},                     # окраска / штукатурка
+    {"wp_paper", "wp_vinyl", "wp"},                    # обои
+    {"pvc_panel", "wood_lining"},                      # панели
+    {"stretch", "paint_wash"},                         # потолки
+]
+
+
+def _same_family(a, b):
+    return any(a in f and b in f for f in FAMILIES)
+
+
 def cheaper_analogs(room: str, ufh: str, rows: list[dict]):
     """Для каждой позиции ищет материалы дешевле, которые проходят ту же проверку без критичных ошибок."""
     out = []
@@ -284,7 +301,8 @@ def cheaper_analogs(room: str, ufh: str, rows: list[dict]):
         cur = MATERIALS[mid]
         cands = []
         for cid, c in MATERIALS.items():
-            if cid == mid or code not in c["surf"].split() or not (0 < c["price"] < cur["price"]):
+            if (cid == mid or code not in c["surf"].split() or not (0 < c["price"] < cur["price"])
+                    or not _same_family(mid, cid)):
                 continue
             check = audit(room, ufh, [{"Поверхность": surf, "Материал": c["kw"][0]}])
             if any(f.severity == "critical" for f in check.findings):

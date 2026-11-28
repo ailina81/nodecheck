@@ -80,6 +80,24 @@ def llm_config():
                 model=get("LLM_MODEL", "gemini-3.8-flash, gemini-flash-latest, gemini-flash-lite-latest"))
 
 
+def parse_json(text: str) -> dict:
+    """Достаёт JSON из ответа модели и чинит типичные ошибки (лишние запятые, обрывы, markdown)."""
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`").removeprefix("json").strip()
+    s, e = text.find("{"), text.rfind("}")
+    if s != -1 and e > s:
+        text = text[s:e + 1]
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        from json_repair import repair_json
+        data = repair_json(text, return_objects=True)
+        if not isinstance(data, dict) or "findings" not in data:
+            raise
+        return data
+
+
 def run_llm(cfg, room, ufh, budget, style, rows, rule_result, want_cheaper=False):
     from openai import OpenAI
     user_msg = json.dumps(dict(
@@ -93,7 +111,8 @@ def run_llm(cfg, room, ufh, budget, style, rows, rule_result, want_cheaper=False
     models = [m.strip() for m in cfg["model"].split(",") if m.strip()]
     last_err = None
     for model in models:
-        kwargs = dict(model=model, temperature=0.2, response_format={"type": "json_object"}, messages=msgs)
+        kwargs = dict(model=model, temperature=0.2, max_tokens=4000,
+                      response_format={"type": "json_object"}, messages=msgs)
         try:
             try:
                 resp = client.chat.completions.create(reasoning_effort="low", **kwargs)
@@ -101,16 +120,14 @@ def run_llm(cfg, room, ufh, budget, style, rows, rule_result, want_cheaper=False
                 if "reasoning" not in str(e).lower():
                     raise
                 resp = client.chat.completions.create(**kwargs)
+            data = parse_json(resp.choices[0].message.content)
             break
-        except Exception as e:  # 503 перегрузка / 429 лимит / 404 нет модели → пробуем следующую
+        except Exception as e:  # 503 / 429 / 404 / битый JSON → пробуем следующую модель
             last_err = e
     else:
         raise last_err
     cfg["used_model"] = model
-    text = resp.choices[0].message.content.strip()
-    if text.startswith("```"):
-        text = text.strip("`").removeprefix("json").strip()
-    return json.loads(text)
+    return data
 
 
 # ---------------------------------------------------------------------------
