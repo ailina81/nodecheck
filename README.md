@@ -94,7 +94,7 @@ streamlit run app.py
    ```toml
    LLM_API_KEY = "AIza...ваш ключ Gemini"
    LLM_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-   LLM_MODEL = "gemini-3.8-flash"
+   LLM_MODEL = "gemini-3.8-flash, gemini-flash-latest, gemini-flash-lite-latest"
    ```
 4. **Deploy** → получите ссылку вида `https://nodecheck.streamlit.app`.
 5. Проверьте ссылку с телефона в режиме инкогнито: должна открываться без входа. Логин и пароль не нужны.

@@ -4,6 +4,7 @@ NodeCheck — ИИ-аудит совместимости отделочных м
 """
 import json
 import os
+import time
 
 import pandas as pd
 import streamlit as st
@@ -76,22 +77,36 @@ def llm_config():
         return os.getenv(name, default)
     return dict(api_key=get("LLM_API_KEY") or get("OPENAI_API_KEY"),
                 base_url=get("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/") or None,
-                model=get("LLM_MODEL", "gemini-3.8-flash"))
+                model=get("LLM_MODEL", "gemini-3.8-flash, gemini-flash-latest, gemini-flash-lite-latest"))
 
 
 def run_llm(cfg, room, ufh, budget, style, rows, rule_result, want_cheaper=False):
     from openai import OpenAI
-    client = OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"] or None,
-                    max_retries=5, timeout=60)  # автоповтор при 429/503 (перегрузка модели)
     user_msg = json.dumps(dict(
         room_type=room, underfloor_heating=ufh, budget=budget, style=style, want_cheaper=want_cheaper,
         specification=rows, rule_engine_findings=rule_result.to_dict()["findings"],
         unrecognized_items=rule_result.unknown), ensure_ascii=False, indent=1)
-    resp = client.chat.completions.create(
-        model=cfg["model"], temperature=0.2,
-        response_format={"type": "json_object"},
-        messages=[{"role": "system", "content": SYSTEM_PROMPT},
-                  {"role": "user", "content": user_msg}])
+    client = OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"] or None,
+                    max_retries=1, timeout=40)
+    msgs = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_msg}]
+    # LLM_MODEL может быть списком через запятую: основная модель + запасные
+    models = [m.strip() for m in cfg["model"].split(",") if m.strip()]
+    last_err = None
+    for model in models:
+        kwargs = dict(model=model, temperature=0.2, response_format={"type": "json_object"}, messages=msgs)
+        try:
+            try:
+                resp = client.chat.completions.create(reasoning_effort="low", **kwargs)
+            except Exception as e:
+                if "reasoning" not in str(e).lower():
+                    raise
+                resp = client.chat.completions.create(**kwargs)
+            break
+        except Exception as e:  # 503 перегрузка / 429 лимит / 404 нет модели → пробуем следующую
+            last_err = e
+    else:
+        raise last_err
+    cfg["used_model"] = model
     text = resp.choices[0].message.content.strip()
     if text.startswith("```"):
         text = text.strip("`").removeprefix("json").strip()
@@ -162,9 +177,10 @@ with right:
     data, mode = None, "Офлайн-база правил"
     if use_llm and cfg["api_key"]:
         with st.spinner("ИИ анализирует спецификацию…"):
+            t0 = time.time()
             try:
                 data = run_llm(cfg, room, ufh, budget, style, rows, rule_res, want_cheaper)
-                mode = f"LLM ({cfg['model']}) + база правил"
+                mode = f"LLM ({cfg.get('used_model', cfg['model'])}) + база правил · {time.time() - t0:.1f} с"
             except Exception as e:
                 st.warning(f"LLM недоступна ({type(e).__name__}: {e}). Показан результат базы правил.")
 
